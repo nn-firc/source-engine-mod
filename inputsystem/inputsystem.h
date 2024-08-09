@@ -11,6 +11,7 @@
 #pragma once
 #endif
 
+#include <tier0/platform.h>
 
 #ifdef WIN32
 #if !defined( _X360 )

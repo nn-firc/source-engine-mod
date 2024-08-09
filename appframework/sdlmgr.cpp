@@ -6,7 +6,7 @@
 
 #ifdef USE_SDL
 #include "SDL.h"
-#include "SDL_opengl.h"
+#include "SDL_vulkan.h"
 #endif
 
 #include "appframework/ilaunchermgr.h"
@@ -19,9 +19,6 @@
 
 #include "tier1/utllinkedlist.h"
 #include "tier1/convar.h"
-#ifdef TOGLES
-#include <EGL/egl.h>
-#endif
 
 // NOTE: This has to be the last file included! (turned off below, since this is included like a header)
 #include "tier0/memdbgon.h"
@@ -52,10 +49,6 @@ ConVar gl_finish( "gl_finish", "0" );
 
 ConVar sdl_double_click_size( "sdl_double_click_size", "2" );
 ConVar sdl_double_click_time( "sdl_double_click_time", "400" );
-
-#if defined( DX_TO_GL_ABSTRACTION )
-COpenGLEntryPoints *gGL = NULL;
-#endif
 
 const int kBogusSwapInterval = INT_MAX;
 
@@ -161,29 +154,6 @@ class LinuxAppFuncLogger
 #define SDLAPP_FUNC
 #endif
 
-
-#if defined( DX_TO_GL_ABSTRACTION )
-void	CheckGLError( int line )
-{
-	SDLAPP_FUNC;
-
-	// Don't check this in enabled! glGetError() is extremely slow with threaded drivers.
-	return;
-	//char errbuf[1024];
-
-	//borrowed from GLMCheckError.. slightly different
-	
-	
-	GLenum errorcode = (GLenum)gGL->glGetError();
-	//GLenum errorcode2 = 0;
-	if ( errorcode != GL_NO_ERROR )
-	{
-		const char	*decodedStr = GLMDecode( eGL_ERROR, errorcode );
-
-		printf( "\n(%d) GL Error %08x = '%s'", line, errorcode, decodedStr );
-	}
-}
-#endif
 
 //-----------------------------------------------------------------------------
 #if !defined( DEDICATED )
@@ -294,20 +264,6 @@ public:
 	virtual void RenderedSize( uint &width, uint &height, bool set );	// either set or retrieve rendered size value (from dxabstract)
 	virtual void DisplayedSize( uint &width, uint &height );			// query backbuffer size (window size whether FS or windowed)
 
-#if defined( DX_TO_GL_ABSTRACTION )
-	virtual void GetDesiredPixelFormatAttribsAndRendererInfo( uint **ptrOut, uint *countOut, GLMRendererInfoFields *rendInfoOut );
-
-	virtual PseudoGLContextPtr	GetMainContext();
-	// Get the NSGLContext for a window's main view - note this is the carbon windowref as an argument
-	virtual PseudoGLContextPtr GetGLContextForWindow( void* windowref ) { return (PseudoGLContextPtr)m_GLContext; }
-	virtual PseudoGLContextPtr CreateExtraContext();
-	virtual void DeleteContext( PseudoGLContextPtr hContext );
-	virtual bool MakeContextCurrent( PseudoGLContextPtr hContext );
-	virtual GLMDisplayDB *GetDisplayDB( void );
-
-	virtual void ShowPixels( CShowPixelsParams *params );
-#endif
-
 	virtual void GetStackCrawl( CStackCrawlParams *params );
 
 	virtual void WaitUntilUserInput( int msSleepTime );
@@ -335,12 +291,6 @@ public:
 					
 private:
 	void handleKeyInput( const SDL_Event &event );
-
-#if defined( DX_TO_GL_ABSTRACTION )
-	SDL_GLContext m_GLContext;
-	GLuint m_readFBO;
-	GLMDisplayDB *m_displayDB;
-#endif
 
 #if defined( OSX )
 	// bool					m_leopard;					// true if <10.6.3 and we have to do extra work for fullscreen handling
@@ -517,20 +467,6 @@ InitReturnVal_t CSDLMgr::Init()
 	{
 		if (SDL_Init(SDL_INIT_VIDEO) == -1)
 			Error( "SDL_Init(SDL_INIT_VIDEO) failed: %s", SDL_GetError() );
-
-#if defined( DX_TO_GL_ABSTRACTION )
-		if ( CommandLine()->FindParm( "-gl_debug" ) )
-		{
-			SDL_GL_SetAttribute( SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG );
-		}
-
-#if defined( TOGLES )
-		if (SDL_GL_LoadLibrary("libGLESv3.so") == -1)
-#else
-		if (SDL_GL_LoadLibrary(NULL) == -1)
-#endif
-			Error( "SDL_GL_LoadLibrary(NULL) failed: %s", SDL_GetError() );
-#endif
 	}
 
 	fprintf(stderr, "SDL video target is '%s'\n", SDL_GetCurrentVideoDriver());
@@ -553,11 +489,6 @@ InitReturnVal_t CSDLMgr::Init()
 	m_keyModifiers = 0;
 	m_keyModifierMask = 0;
 	m_mouseButtons = 0;
-#if defined( DX_TO_GL_ABSTRACTION )
-	m_GLContext = NULL;
-	m_readFBO = 0;
-	m_displayDB = NULL;
-#endif
 	m_nWindowRefCount = 0;
 	m_Window = NULL;
 	m_bFullScreen = false;
@@ -709,14 +640,6 @@ void CSDLMgr::Shutdown()
 {
 	SDLAPP_FUNC;
 
-	if (gGL && m_readFBO)
-#ifdef TOGLES
-		gGL->glDeleteFramebuffers(1, &m_readFBO);
-#else
-		gGL->glDeleteFramebuffersEXT(1, &m_readFBO);
-#endif
-	m_readFBO = 0;
-
 	if ( m_Window )
 	{
 		// Slam down the window refcount to 1 to guarantee the main GL context and window are killed.
@@ -724,8 +647,8 @@ void CSDLMgr::Shutdown()
 		DestroyGameWindow();
 	}
 
-	SDL_GL_UnloadLibrary();
-	SDL_QuitSubSystem(SDL_INIT_VIDEO);
+	SDL_Vulkan_UnloadLibrary();
+	SDL_QuitSubSystem( SDL_INIT_VIDEO );
 }
 
 bool CSDLMgr::CreateGameWindow( const char *pTitle, bool bWindowed, int width, int height )
@@ -804,21 +727,14 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height 
 	m_bFullScreen = false;
 	sdl_displayindex_fullscreen.SetValue( -1 );
 
-#if defined( DX_TO_GL_ABSTRACTION )
-	// Set up GL context...
-	const int *attrib = m_pixelFormatAttribs;
-	for (int i = 0; i < m_pixelFormatAttribCount; i++, attrib += 2)
-		SDL_GL_SetAttribute((SDL_GLattr) attrib[0], attrib[1]);
-#endif
-
 	// no window yet? Create one now!
 	m_nWindowRefCount = 1;
 
 	int x = SDL_WINDOWPOS_CENTERED;
 	int y = SDL_WINDOWPOS_CENTERED;
 	int flags = SDL_WINDOW_HIDDEN;
-#if defined( DX_TO_GL_ABSTRACTION )
-	flags |= SDL_WINDOW_OPENGL;
+#if defined( DXVK )
+	flags |= SDL_WINDOW_VULKAN;
 #endif
 	m_Window = SDL_CreateWindow( pTitle, x, y, width, height, flags );
 
@@ -848,85 +764,6 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height 
 	}
 #endif
 
-#if defined( DX_TO_GL_ABSTRACTION )
-	m_GLContext = SDL_GL_CreateContext(m_Window);
-	if (m_GLContext == NULL)
-		Error( "Failed to create GL context: %s", SDL_GetError() );
-
-	SDL_GL_MakeCurrent(m_Window, m_GLContext);
-
-#if defined ANDROID && !defined TOGLES
-	if( l_gl4es )
-	{
-		_glGetProcAddress = (t_glGetProcAddress)dlsym(l_gl4es, "gl4es_GetProcAddress" );
-		void (*initialize_gl4es)( );
-		initialize_gl4es = (void(*)())dlsym(l_gl4es, "initialize_gl4es" );
-		initialize_gl4es();
-	}
-#endif
-
-	// !!! FIXME: note for later...we never delete this context anywhere, I think.
-	// !!! FIXME:  when we do get around to that, don't forget to delete/NULL gGL!
-
-	static CDynamicFunctionOpenGL< true, const GLubyte *( APIENTRY *)(GLenum name), const GLubyte * > glGetString("glGetString");
-	static CDynamicFunctionOpenGL< true, GLvoid ( APIENTRY *)(GLenum pname, GLint *params), GLvoid > glGetIntegerv("glGetIntegerv");
-
-#ifdef DBGFLAG_ASSERT
-	const char *pszString = ( const char * )glGetString(GL_VENDOR);
-	pszString = ( const char * )glGetString(GL_RENDERER);
-	pszString = ( const char * )glGetString(GL_VERSION);
-	pszString = ( const char * )glGetString(GL_EXTENSIONS);
-
-	// If we specified -gl_debug, make sure the extension string is present now.
-	if ( CommandLine()->FindParm( "-gl_debug" ) )
-	{
-#ifndef TOGLES
-		Assert( V_strstr(pszString, "GL_ARB_debug_output") );
-#endif
-	}
-#endif // DBGFLAG_ASSERT
-
-	gGL = GetOpenGLEntryPoints(VoidFnPtrLookup_GlMgr);
-
-	// It is now safe to call any base GL entry point that's supplied by gGL.
-	// You still need to explicitly test for extension entry points, though!
-
-	if ( CommandLine()->FindParm( "-gl_dump_strings" ) )
-	{
-		DebugPrintf("GL_RENDERER: %s\n", (const char *) gGL->glGetString(GL_RENDERER));
-		DebugPrintf("GL_VENDOR: %s\n", (const char *) gGL->glGetString(GL_VENDOR));
-		DebugPrintf("GL_VERSION: %s\n", (const char *) gGL->glGetString(GL_VERSION));
-		const char *exts = (const char *) gGL->glGetString(GL_EXTENSIONS);
-		DebugPrintf("GL_EXTENSIONS:%s\n", exts ? "" : NULL);
-		if (exts)
-		{
-			for (const char *ptr = exts; *ptr; ptr++)
-				DebugPrintf("%c", *ptr == ' ' ? '\n' : *ptr);
-			DebugPrintf("\n");
-		}
-		DebugPrintf("\n");
-	}
-
-#ifdef TOGLES
-	gGL->glGenFramebuffers(1, &m_readFBO);
-#else
-	gGL->glGenFramebuffersEXT(1, &m_readFBO);
-#endif
-
-	gGL->glViewport(0, 0, width, height);    /* Reset The Current Viewport And Perspective Transformation */
-	gGL->glScissor(0, 0, width, height);    /* Reset The Current Viewport And Perspective Transformation */
-
-	// Blank out the initial window, so we're not looking at uninitialized
-	//  video RAM trash until we start proper drawing.
-	gGL->glClearColor(0,0,0,0);
-	gGL->glClear(GL_COLOR_BUFFER_BIT);
-	SDL_GL_SwapWindow(m_Window);
-	gGL->glClear(GL_COLOR_BUFFER_BIT);
-	SDL_GL_SwapWindow(m_Window);
-	gGL->glClear(GL_COLOR_BUFFER_BIT);
-	SDL_GL_SwapWindow(m_Window);
-#endif // DX_TO_GL_ABSTRACTION
-
 	m_WindowWidth = width;
 	m_WindowHeight = height;
 
@@ -937,53 +774,6 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height 
 
 	return true;
 }
-
-#if defined( DX_TO_GL_ABSTRACTION )
-
-PseudoGLContextPtr	CSDLMgr::GetMainContext()
-{
-	SDLAPP_FUNC;
-
-	return (PseudoGLContextPtr)m_GLContext;
-}
-
-PseudoGLContextPtr CSDLMgr::CreateExtraContext()
-{
-	SDLAPP_FUNC;
-
-	const int *attrib = m_pixelFormatAttribs;
-	for (int i = 0; i < m_pixelFormatAttribCount; i++, attrib += 2)
-		SDL_GL_SetAttribute((SDL_GLattr) attrib[0], attrib[1]);
-
-	return (PseudoGLContextPtr) SDL_GL_CreateContext(m_Window);
-}
-
-void CSDLMgr::DeleteContext( PseudoGLContextPtr hContext )
-{
-	SDLAPP_FUNC;
-	Assert( (SDL_GLContext)hContext != m_GLContext );
-	
-	// Don't delete the main one.
-	if ( (SDL_GLContext)hContext != m_GLContext )
-	{
-		if ( m_Window )
-		{
-			SDL_GL_MakeCurrent(m_Window, hContext);
-		}
-		SDL_GL_DeleteContext((SDL_GLContext) hContext);
-	}
-}
-
-bool CSDLMgr::MakeContextCurrent( PseudoGLContextPtr hContext )
-{
-	SDLAPP_FUNC;
-
-	// We only ever have one GL context on Linux at the moment, so don't spam these calls.
-	return SDL_GL_MakeCurrent(m_Window, (SDL_GLContext)hContext ) == 0;
-}
-
-#endif // DX_TO_GL_ABSTRACTION
-
 
 int CSDLMgr::GetEvents( CCocoaEvent *pEvents, int nMaxEventsToReturn, bool debugEvent )
 {
@@ -1182,280 +972,6 @@ void CSDLMgr::OnFrameRendered()
 	}
 }
 
-#if defined( DX_TO_GL_ABSTRACTION )
-void CSDLMgr::ShowPixels( CShowPixelsParams *params )
-{
-	SDLAPP_FUNC;
-	
-	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, __FUNCTION__ );
-
-	if (params->m_onlySyncView)
-		return;
-
-	int swapInterval	= 0;
-	int swapLimit		= 0;
-
-	if (gl_swapdebug.GetInt())
-	{
-		// just jam through these debug convars every frame
-		// but they will be shock absorbed below
-			
-		swapInterval	= gl_swapinterval.GetInt();
-		swapLimit		= gl_swaplimit.GetInt();
-	}
-	else
-	{
-		// jam through (sync&limit) = 1 or 0..
-		swapInterval	= params->m_vsyncEnable ? 1 : 0;
-		swapLimit		= 1; // params->m_vsyncEnable ? 1 : 0;	// no good reason to turn off swap limit in normal user mode
-
-#ifdef OSX
-		// only do the funky forced vsync for NV on 10.6.4 and only if the bypass is not turned on
-		if (m_force_vsync && (gl_disable_forced_vsync.GetInt()==0))
-		{
-			swapInterval	= 1;
-			swapLimit		= 1;
-		}
-#else
-		if (gl_swaptear.GetInt() && gGL->HasSwapTearExtension())
-		{
-			// For 0, do nothing. For 1, make it -1.
-			swapInterval = -swapInterval;
-		}
-#endif
-	}
-		
-	// only touch them on changes, or right after a change in windowed/FS state
-	if ( (swapInterval!=m_lastKnownSwapInterval) || (swapLimit!=m_lastKnownSwapLimit) )
-	{
-		
-		if (swapInterval!=m_lastKnownSwapInterval)
-		{
-			// This code hits when we turn on vsync, if we're going to swap tear.
-			// We want to do one frame of real vsync to get the engine to sync at the top 
-			// of the frame refresh.
-			if (swapInterval < 0 && (m_lastKnownSwapInterval == 0 || m_lastKnownSwapInterval == kBogusSwapInterval))  {
-				swapInterval = -swapInterval;
-			}
-			SDL_GL_SetSwapInterval(swapInterval);
-		}
-
-		m_lastKnownSwapInterval = swapInterval;
-		m_lastKnownSwapLimit = swapLimit;
-
-		printf("\n ##### swap interval = %d     swap limit = %d #####\n", m_lastKnownSwapInterval, m_lastKnownSwapLimit );
-		fflush(stdout);
-
-	}
-
-#ifdef OSX
-	if (!params->m_noBlit)
-	{
-		if ( params->m_useBlit ) // FBO blit path - which is what we *should* be using.  But if the params say no, then don't do it because the ext is not there.
-		{
-			// bind a quickie FBO to enclose the source texture
-			GLint	myreadfb = 1000;
-
-#ifdef TOGLES
-			glBindFramebuffer( GL_READ_FRAMEBUFFER, myreadfb);
-			CheckGLError( __LINE__ );
-
-			glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0);		// to the default FB/backbuffer
-			CheckGLError( __LINE__ );
-
-			// attach source tex to source FB
-			glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, params->m_srcTexName, 0);
-			CheckGLError( __LINE__ );
-#else
-			glBindFramebufferEXT( GL_READ_FRAMEBUFFER_EXT, myreadfb);
-			CheckGLError( __LINE__ );
-
-			glBindFramebufferEXT( GL_DRAW_FRAMEBUFFER_EXT, 0);		// to the default FB/backbuffer
-			CheckGLError( __LINE__ );
-
-			// attach source tex to source FB
-			glFramebufferTexture2DEXT( GL_READ_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, params->m_srcTexName, 0);
-			CheckGLError( __LINE__ );
-#endif
-
-			// blit
-
-			int srcxmin = 0;
-			int srcymin = 0;
-			int srcxmax = params->m_width;
-			int srcymax = params->m_height;
-
-			// normal blit
-			int dstxmin = 0;
-			int dstymin = 0;
-			int dstxmax = 0;
-			int dstymax = 0;
-
-			SDL_GetWindowSize(m_Window, &dstxmax, &dstymax);
-
-			if (gl_blit_halfx.GetInt())
-			{
-				// blit right half
-				srcxmin += srcxmax/2;
-				dstxmin += dstxmax/2;
-			}
-
-			if (gl_blit_halfy.GetInt())
-			{
-				// blit top half
-				// er, but top on screen is bottom of GL y coord range
-				srcymax /= 2;
-				dstymin += dstymax/2;
-			}
-
-			// go NEAREST if sizes match
-			GLenum filter = ( ((srcxmax-srcxmin)==(dstxmax-dstxmin)) && ((srcymax-srcymin)==(dstymax-dstymin)) ) ? GL_NEAREST : GL_LINEAR;
-
-#ifdef TOGLES
-			glBlitFramebuffer(
-					/* src min and maxes xy xy */ srcxmin, srcymin,				srcxmax,srcymax,
-					/* dst min and maxes xy xy */ dstxmin, dstymax,				dstxmax,dstymin,		// note yflip here
-					GL_COLOR_BUFFER_BIT, filter );
-			CheckGLError( __LINE__ );
-
-			// detach source tex
-			glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
-			CheckGLError( __LINE__ );
-
-			glBindFramebuffer( GL_READ_FRAMEBUFFER, 0);
-			CheckGLError( __LINE__ );
-
-			glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0);		// to the default FB/backbuffer
-			CheckGLError( __LINE__ );
-#else
-			glBlitFramebufferEXT(
-					/* src min and maxes xy xy */ srcxmin, srcymin,				srcxmax,srcymax,
-					/* dst min and maxes xy xy */ dstxmin, dstymax,				dstxmax,dstymin,		// note yflip here
-					GL_COLOR_BUFFER_BIT, filter );
-			CheckGLError( __LINE__ );
-
-			// detach source tex
-			glFramebufferTexture2DEXT( GL_READ_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, 0, 0);
-			CheckGLError( __LINE__ );
-
-			glBindFramebufferEXT( GL_READ_FRAMEBUFFER_EXT, 0);
-			CheckGLError( __LINE__ );
-
-			glBindFramebufferEXT( GL_DRAW_FRAMEBUFFER_EXT, 0);		// to the default FB/backbuffer
-			CheckGLError( __LINE__ );
-#endif
-
-		}
-		else
-		{
-			// old blit - gets very dark output with sRGB sources... not good
-			bool texing = true;
-
-			glUseProgram(NULL);
-
-			glDisable( GL_DEPTH_TEST );
-			glDepthMask( GL_FALSE );
-
-			glActiveTexture( GL_TEXTURE0 );
-
-			if (texing)
-			{
-				Assert( glIsTexture (params->m_srcTexName) );
-
-				glEnable(GL_TEXTURE_2D);
-				glBindTexture( GL_TEXTURE_2D, params->m_srcTexName );
-				CheckGLError( __LINE__ );
-
-				GLint width;
-				glGetTexLevelParameteriv(	GL_TEXTURE_2D,			//target
-						0,						//level,
-						GL_TEXTURE_WIDTH,		//pname
-						&width
-						);
-				CheckGLError( __LINE__ );
-			}
-			else
-			{
-				glBindTexture( GL_TEXTURE_2D, 0 );
-				CheckGLError( __LINE__ );
-
-				glDisable( GL_TEXTURE_2D );
-				glColor4f( 1.0, 0.0, 0.0, 1.0 );
-			}
-
-
-			// immediate mode is fine for a simple textured quad
-			// later if we switch the Valve side to render into an RBO, then this would turn into an FBO blit
-			// note, do not check glGetError in between glBegin/glEnd, lol
-
-			// flipped
-			float topv = 0.0;
-			float botv = 1.0;
-
-			glBegin(GL_QUADS);
-
-			if (texing)
-				glTexCoord2f( 0.0, botv );
-			glVertex3f		( -1.0, -1.0, 0.0 );
-
-			if (texing)
-				glTexCoord2f( 1.0, botv );
-			glVertex3f		( 1.0, -1.0, 0.0 );
-
-			if (texing)
-				glTexCoord2f( 1.0, topv );
-			glVertex3f		( 1.0, 1.0, 0.0 );
-
-			if (texing)
-				glTexCoord2f( 0.0, topv );
-			glVertex3f		( -1.0, 1.0, 0.0 );
-			glEnd();
-			CheckGLError( __LINE__ );
-
-			if (texing)
-			{
-				glBindTexture( GL_TEXTURE_2D, 0 );
-				CheckGLError( __LINE__ );
-
-				glDisable(GL_TEXTURE_2D);
-			}
-
-		}
-	}
-#endif
-
-	if ( gl_finish.GetInt() )
-	{
-		gGL->glFinish();
-	}
-	CheckGLError( __LINE__ );
-
-	CFastTimer tm;
-	tm.Start();
-
-	SDL_GL_SwapWindow( m_Window );
-
-	m_flPrevGLSwapWindowTime = tm.GetDurationInProgress().GetMillisecondsF();
-
-#ifdef ANDROID
-	// ADRENO GPU MOMENT, SKIP 5 FRAMES
-	if( m_bResetVsync )
-	{
-		if( m_nFramesToSkip <= 0 )
-		{
-			SDL_GL_SetSwapInterval(swapInterval);
-			m_bResetVsync = false;
-		}
-		else
-			m_nFramesToSkip--;
-	}
-#endif
-
-	CheckGLError( __LINE__ );
-}
-#endif // DX_TO_GL_ABSTRACTION
-
-
 void CSDLMgr::SetWindowFullScreen( bool bFullScreen, int nWidth, int nHeight )
 {
 	SDLAPP_FUNC;
@@ -1565,11 +1081,6 @@ void CSDLMgr::SizeWindow( int width, int tall )
 	m_nWarpDelta = Max( m_WindowHeight / 3, 200 );
 
 	SDL_SetWindowSize( m_Window, width, tall );
-
-#if defined( DX_TO_GL_ABSTRACTION )
-	gGL->glViewport(0, 0, (GLsizei) width, (GLsizei) tall);
-	gGL->glScissor( 0,0, (GLsizei) width, (GLsizei) tall );
-#endif
 
 	// If the Window hasn't been shown yet, show it now.
 	if ( !m_WindowShownAndRaised )
@@ -2013,32 +1524,6 @@ void CSDLMgr::DecWindowRefCount()
 
 	if ( !m_nWindowRefCount )
 	{
-#if defined( DX_TO_GL_ABSTRACTION )
-		if ( m_Window )
-		{
-			SDL_GL_MakeCurrent( m_Window, m_GLContext );
-		}
-
-		if ( gGL && m_readFBO )
-		{
-#ifdef TOGLES
-			gGL->glDeleteFramebuffers( 1, &m_readFBO );
-#else
-			gGL->glDeleteFramebuffersEXT( 1, &m_readFBO );
-#endif
-		}
-		m_readFBO = 0;
-								
-		SDL_GL_DeleteContext( m_GLContext );
-#if !defined( OSX ) && defined( DBGFLAG_ASSERT )
-		// Clear the GL entrypoint pointers, ensuring we crash if someone tries to call GL after we delete the context.
-		Msg( "%s: Calling ClearOpenGLEntryPoints. Should crash if someone calls GL after this.\n", __FUNCTION__ );
-		ClearOpenGLEntryPoints();
-#endif
-
-		m_GLContext = NULL;
-#endif // DX_TO_GL_ABSTRACTION
-
 		SDL_SetWindowFullscreen(m_Window, SDL_FALSE);  // just in case.
 		SDL_SetWindowGrab(m_Window, SDL_FALSE);  // just in case.
 		SDL_DestroyWindow(m_Window);
@@ -2165,90 +1650,6 @@ void CSDLMgr::SetGammaRamp( const uint16 *pRed, const uint16 *pGreen, const uint
 		}
 	}
 }
-
-//===============================================================================
-
-#if defined( DX_TO_GL_ABSTRACTION )
-void CSDLMgr::GetDesiredPixelFormatAttribsAndRendererInfo( uint **ptrOut, uint *countOut, GLMRendererInfoFields *rendInfoOut )
-{
-	SDLAPP_FUNC;
-
-	Assert( m_pixelFormatAttribCount > 0 );
-
-	if (ptrOut) *ptrOut = (uint *) m_pixelFormatAttribs;
-	if (countOut) *countOut = m_pixelFormatAttribCount;
-	if (rendInfoOut)
-	{
-		GLMDisplayDB *db = GetDisplayDB();
-#ifdef OSX
-		*rendInfoOut = db->m_renderers->Head()->m_info;
-#else
-		*rendInfoOut = db->m_renderer.m_info;
-#endif
-	}
-}
-
-
-
-GLMDisplayMode::GLMDisplayMode( uint width, uint height, uint refreshHz )
-{
-	SDLAPP_FUNC;
-
-	Init( width, height, refreshHz );
-}
-
-GLMDisplayMode::~GLMDisplayMode()
-{
-	SDLAPP_FUNC;
-	// empty
-}
-
-void GLMDisplayMode::Init( uint width, uint height, uint refreshHz )
-{
-	SDLAPP_FUNC;
-
-	m_info.m_modePixelWidth = width;
-	m_info.m_modePixelHeight = height;
-	m_info.m_modeRefreshHz = refreshHz;
-}
-
-void GLMDisplayMode::Dump( int which )
-{
-	SDLAPP_FUNC;
-
-	GLMPRINTF(("\n             # %-2d  width=%-4d  height=%-4d  refreshHz=%-2d",
-			   which, m_info.m_modePixelWidth, m_info.m_modePixelHeight, m_info.m_modeRefreshHz ));
-}
-
-GLMDisplayDB *CSDLMgr::GetDisplayDB( void )
-{
-	SDLAPP_FUNC;
-
-	if ( !m_displayDB )
-	{
-		m_displayDB = new GLMDisplayDB;		// creating the DB object does not do much other than init it to a good state.
-		m_displayDB->Populate();			// populate the tree
-#if defined( OSX )
-		// side effect: we fill in m_force_vsync..
-		{
-			GLMRendererInfoFields	info;
-			m_displayDB->GetRendererInfo( 0, &info );
-
-			// m_leopard = (info.m_osComboVersion < 0x000A0600);
-
-			m_force_vsync = info.m_badDriver1064NV;		// just force it if it's the bum NV driver
-		}
-#endif
-	}
-	return m_displayDB;
-}
-
-#ifndef OSX
-#include "glmdisplaydb_linuxwin.inl"
-#endif
-
-
-#endif // DX_TO_GL_ABSTRACTION
 
 #endif  // !DEDICATED
 

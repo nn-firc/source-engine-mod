@@ -94,7 +94,7 @@ projects={
 		'utils/vtex',
 		'unicode',
 		'video',
-        'game/gamepadui',
+        'game/gamepadui'
 	],
 	'tests': [
 		'appframework',
@@ -180,8 +180,6 @@ def run_test(self, fragment, msg):
 def define_platform(conf):
 	conf.env.DEDICATED = conf.options.DEDICATED
 	conf.env.TESTS = conf.options.TESTS
-	conf.env.TOGLES = conf.options.TOGLES
-	conf.env.GL = conf.options.GL and not conf.options.TESTS and not conf.options.DEDICATED
 	conf.env.OPUS = conf.options.OPUS
 
 	arch32 = conf.run_test(CPP_32BIT_CHECK, 'Testing 32bit support')
@@ -197,15 +195,9 @@ def define_platform(conf):
 	if conf.options.TESTS:
 		conf.define('UNITTESTS', 1)
 
-	if conf.env.GL:
-		conf.env.append_unique('DEFINES', [
-			'DX_TO_GL_ABSTRACTION',
-			'GL_GLEXT_PROTOTYPES',
-			'BINK_VIDEO'
-		])
-
-	if conf.options.TOGLES:
-		conf.env.append_unique('DEFINES', ['TOGLES'])
+	if conf.options.DXVK:
+		conf.env.DXVK = 1
+		conf.env.append_unique('DEFINES', ['DXVK'])
 
 	if conf.options.TESTS:
 		conf.define('UNITTESTS', 1)
@@ -301,8 +293,8 @@ def options(opt):
 	grp.add_option('--use-sdl', action = 'store', dest = 'SDL', type = 'int', default = sys.platform != 'win32',
 		help = 'build engine with SDL [default: %default]')
 
-	grp.add_option('--use-togl', action = 'store', dest = 'GL', type = 'int', default = sys.platform != 'win32',
-		help = 'build engine with ToGL [default: %default]')
+	grp.add_option('--use-dxvk', action = 'store', dest = 'DXVK', type = 'int', default = sys.platform != 'win32',
+		help = 'build engine with DXVK [default: %default]')
 
 	grp.add_option('--build-games', action = 'store', dest = 'GAMES', type = 'string', default = 'hl2',
 		help = 'build games [default: %default]')
@@ -312,9 +304,6 @@ def options(opt):
 
 	grp.add_option('--disable-warns', action = 'store_true', dest = 'DISABLE_WARNS', default = False,
 		help = 'build using ccache [default: %default]')
-
-	grp.add_option('--togles', action = 'store_true', dest = 'TOGLES', default = False,
-		help = 'build engine with ToGLES [default: %default]')
 
 	# TODO(nillerusr): add wscript for opus building
 	grp.add_option('--enable-opus', action = 'store_true', dest = 'OPUS', default = False,
@@ -460,10 +449,17 @@ def configure(conf):
 
 	define_platform(conf)
 
-	if conf.env.TOGLES:
-		projects['game'] += ['togles']
-	elif conf.env.GL:
-		projects['game'] += ['togl']
+	if conf.options.DXVK:
+		projects['game'] += [
+			'dxvk-native-1.9.2b/src/d3d9',
+			'dxvk-native-1.9.2b/src/dxso',
+			'dxvk-native-1.9.2b/src/dxvk',
+			'dxvk-native-1.9.2b/src/spirv',
+			'dxvk-native-1.9.2b/src/util',
+			'dxvk-native-1.9.2b/src/vulkan',
+			'dxvk-native-1.9.2b/src/wsi',
+			'stub_d3dx'
+		]
 
 	if conf.env.DEST_OS == 'win32':
 		projects['game'] += ['utils/bzip2']
@@ -576,7 +572,7 @@ def configure(conf):
 	# And here C++ flags starts to be treated separately
 	cxxflags = list(cflags)
 	if conf.env.DEST_OS != 'win32':
-		cxxflags += ['-std=c++11','-fpermissive']
+		cxxflags += ['-std=c++17','-fpermissive']
 
 	if conf.env.COMPILER_CC == 'gcc':
 		conf.define('COMPILER_GCC', 1)
@@ -645,9 +641,16 @@ def build(bld):
 	elif bld.env.DEDICATED:
 		bld.add_subproject(projects['dedicated'])
 	else:
-		if bld.env.TOGLES:
-			projects['game'] += ['togles']
-		elif bld.env.GL:
-			projects['game'] += ['togl']
+		if bld.env.DXVK:
+			projects['game'] += [
+				'dxvk-native-1.9.2b/src/d3d9',
+				'dxvk-native-1.9.2b/src/dxso',
+				'dxvk-native-1.9.2b/src/dxvk',
+				'dxvk-native-1.9.2b/src/spirv',
+				'dxvk-native-1.9.2b/src/util',
+				'dxvk-native-1.9.2b/src/vulkan',
+				'dxvk-native-1.9.2b/src/wsi',
+				'stub_d3dx'
+			]
 
 		bld.add_subproject(projects['game'])

@@ -85,9 +85,9 @@ void SetThreadAffinityMask( void *hThread, int nMask )
 	DebuggerBreak();
 }
 
-bool GUID::operator==( const struct _GUID &other ) const
+uint64 GetVidMemBytes( void )
 {
 	DebuggerBreak();
-	return memcmp( this, &other, sizeof( GUID ) ) == 0;
+	return 1024 * 1024 * 1024;
 }
 #endif

@@ -12,7 +12,9 @@
 
 #if defined( _WIN32 ) && !defined( _X360 )
 #include "winlite.h"
-#elif defined(POSIX)
+#elif defined( DXVK )
+// we include windows.h in tier0/platform.h
+#elif defined( POSIX )
 typedef void *HDC;
 #endif
 
@@ -1121,7 +1123,7 @@ void CVideoMode_Common::DrawNullBackground( void *hHDC, int w, int h )
 
 }
 
-#ifndef _WIN32
+#if !defined( _WIN32 ) && !defined( DXVK )
 
 typedef unsigned char BYTE;
 typedef signed long LONG;

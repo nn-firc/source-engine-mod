@@ -5,6 +5,8 @@
 //===========================================================================//
 #if defined( _WIN32 ) && !defined( _X360 )
 #include <windows.h>
+#elif defined( DXVK )
+#include "../dxvk-native-1.9.2b/include/native/windows/windows.h"
 #endif
 
 #if !defined( DONT_PROTECT_FILEIO_FUNCTIONS )

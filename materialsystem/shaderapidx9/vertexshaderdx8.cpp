@@ -304,9 +304,9 @@ static HardwareShader_t CreateD3DVertexShader( DWORD *pByteCode, int numBytes, c
 	// Compute the vertex specification
 	HardwareShader_t hShader;
 
-	#ifdef DX_TO_GL_ABSTRACTION	
-		HRESULT hr = Dx9Device()->CreateVertexShader( pByteCode, (IDirect3DVertexShader9 **)&hShader, pShaderName, debugLabel );
-	#else
+#ifdef DXVK
+		HRESULT hr = Dx9Device()->CreateVertexShader( pByteCode, (IDirect3DVertexShader9 **)&hShader );
+#else
 		if ( IsEmulatingGL() )
 		{
 			DWORD dwVersion = D3DXGetShaderVersion(	pByteCode );
@@ -314,13 +314,13 @@ static HardwareShader_t CreateD3DVertexShader( DWORD *pByteCode, int numBytes, c
 			Assert ( D3DSHADER_VERSION_MAJOR( dwVersion ) == 2 );
 		}
 
-	#if defined(_X360) || !defined(DX_TO_GL_ABSTRACTION)
+#if defined(_X360)
 		HRESULT hr = Dx9Device()->CreateVertexShader( pByteCode, (IDirect3DVertexShader9 **)&hShader );
-	#else
+#else
 		HRESULT hr = Dx9Device()->CreateVertexShader( pByteCode, (IDirect3DVertexShader9 **)&hShader, pShaderName );
 #endif
 
-	#endif
+#endif
 
 	// NOTE: This isn't recorded before the CreateVertexShader because
 	// we don't know the value of shader until after the CreateVertexShader.
@@ -422,25 +422,22 @@ static HardwareShader_t CreateD3DPixelShader( DWORD *pByteCode, unsigned int nCe
 	}
 
 	HardwareShader_t shader;
-	#if defined( DX_TO_GL_ABSTRACTION ) 
-		#if defined( OSX ) 
-			HRESULT hr = Dx9Device()->CreatePixelShader( pByteCode, ( IDirect3DPixelShader ** )&shader, pShaderName, debugLabel );
-		#else
-			HRESULT hr = Dx9Device()->CreatePixelShader( pByteCode, ( IDirect3DPixelShader ** )&shader, pShaderName, debugLabel, &nCentroidMask );
-		#endif
-	#else
-		if ( IsEmulatingGL() )
-		{
-			DWORD dwVersion;
-			dwVersion = D3DXGetShaderVersion( pByteCode );
-			Assert ( D3DSHADER_VERSION_MAJOR( dwVersion ) == 2 );
-		}
-#if defined(_X360) || !defined(DX_TO_GL_ABSTRACTION)
-		HRESULT hr = Dx9Device()->CreatePixelShader( pByteCode, ( IDirect3DPixelShader ** )&shader );
+
+#if defined( DXVK ) 
+	HRESULT hr = Dx9Device()->CreatePixelShader( pByteCode, ( IDirect3DPixelShader ** )&shader );
 #else
-		HRESULT hr = Dx9Device()->CreatePixelShader( pByteCode, ( IDirect3DPixelShader ** )&shader, pShaderName );
-	#endif
-	#endif
+	if ( IsEmulatingGL() )
+	{
+		DWORD dwVersion;
+		dwVersion = D3DXGetShaderVersion( pByteCode );
+		Assert ( D3DSHADER_VERSION_MAJOR( dwVersion ) == 2 );
+	}
+#if defined(_X360)
+	HRESULT hr = Dx9Device()->CreatePixelShader( pByteCode, ( IDirect3DPixelShader ** )&shader );
+#else
+	HRESULT hr = Dx9Device()->CreatePixelShader( pByteCode, ( IDirect3DPixelShader ** )&shader, pShaderName );
+#endif
+#endif
 	
 	// NOTE: We have to do this after creating the pixel shader since we don't know
 	// lookup.m_PixelShader yet!!!!!!!
@@ -956,6 +953,10 @@ void CShaderManager::Shutdown()
 //-----------------------------------------------------------------------------
 IShaderBuffer *CShaderManager::CompileShader( const char *pProgram, size_t nBufLen, const char *pShaderVersion )
 {
+#ifdef DXVK
+	Warning( "dxvk doesn't support shader compilation!\n" );
+	return NULL;
+#else
 	int nCompileFlags = D3DXSHADER_AVOID_FLOW_CONTROL;
 
 #ifdef _DEBUG
@@ -987,6 +988,7 @@ IShaderBuffer *CShaderManager::CompileShader( const char *pProgram, size_t nBufL
 	}
 
 	return pShaderBuffer;
+#endif // DXVK
 }
 
 

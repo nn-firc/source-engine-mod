@@ -10,7 +10,6 @@
 #pragma once
 #endif
 
-
 #include "tier1/utlmemory.h"
 #include "tier1/strtools.h"
 #include "limits.h"
@@ -350,8 +349,8 @@ class StringFuncs<char>
 public:
 	static char		  *Duplicate( const char *pValue ) { return strdup( pValue ); }
 	// Note that this function takes a character count, and does not guarantee null-termination.
-	static void		   Copy( OUT_CAP(iLengthInChars) char *out_pOut, const char *pIn, int iLengthInChars ) { strncpy( out_pOut, pIn, iLengthInChars ); }
-	static int		   Compare( const char *pLhs, const char *pRhs ) { return strcmp( pLhs, pRhs ); }
+	static void		   Copy( OUT_CAP(iLengthInChars) char *out_pOut, const char *pIn, int iLengthInChars ) { V_strncpy( out_pOut, pIn, iLengthInChars ); }
+	static int		   Compare( const char *pLhs, const char *pRhs ) { return V_strcmp( pLhs, pRhs ); }
 	static int		   CaselessCompare( const char *pLhs, const char *pRhs ) { return Q_strcasecmp( pLhs, pRhs ); }
 	static int		   Length( const char *pValue ) { return (int)strlen( pValue ); }
 	static const char *FindChar( const char *pStr, const char cSearch ) { return strchr( pStr, cSearch ); }

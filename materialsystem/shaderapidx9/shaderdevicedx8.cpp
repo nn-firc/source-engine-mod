@@ -26,15 +26,10 @@
 #include "winutils.h"
 #include "tier0/vprof_telemetry.h"
 
-#if defined ( DX_TO_GL_ABSTRACTION )
-// Placed here so inlines placed in dxabstract.h can access gGL
-COpenGLEntryPoints *gGL = NULL;
-#endif
-
 #define D3D_BATCH_PERF_ANALYSIS 0
 
 #if D3D_BATCH_PERF_ANALYSIS
-#if defined( DX_TO_GL_ABSTRACTION )
+#if defined( DXVK )
 #error Cannot enable D3D_BATCH_PERF_ANALYSIS when using DX_TO_GL_ABSTRACTION, use GL_BATCH_PERF_ANALYSIS instead.
 #endif
 // Define this if you want all d3d9 interfaces hooked and run through the dx9hook.h shim interfaces. For profiling, etc.
@@ -2288,7 +2283,7 @@ bool CShaderDeviceDx8::CreateD3DDevice( void* pHWnd, int nAdapter, const ShaderD
 
 	VD3DHWND hWnd = (VD3DHWND)pHWnd;
 
-#if ( !defined( PIX_INSTRUMENTATION ) && !defined( _X360 ) && !defined( NVPERFHUD ) )
+#if ( !defined( PIX_INSTRUMENTATION ) && !defined( _X360 ) && !defined( NVPERFHUD ) ) && !defined( DXVK )
 	D3DPERF_SetOptions(1);	// Explicitly disallow PIX instrumented profiling in external builds
 #endif
 
@@ -3404,7 +3399,7 @@ void CShaderDeviceDx8::Present()
 		if ( IsPC() && ( m_IsResizing || ( m_ViewHWnd != (VD3DHWND)m_hWnd ) ) )
 		{
 			RECT destRect;
-			#ifndef DX_TO_GL_ABSTRACTION
+			#ifndef DXVK
 					GetClientRect( ( HWND )m_ViewHWnd, &destRect );
 			#else
 					toglGetClientRect( (VD3DHWND)m_ViewHWnd, &destRect );

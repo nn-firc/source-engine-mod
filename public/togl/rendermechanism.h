@@ -1,58 +1,36 @@
-//========= Copyright Valve Corporation, All rights reserved. ============//
-//                       TOGL CODE LICENSE
-//
-//  Copyright 2011-2014 Valve Corporation
-//  All Rights Reserved.
-//
-//  Permission is hereby granted, free of charge, to any person obtaining a copy
-//  of this software and associated documentation files (the "Software"), to deal
-//  in the Software without restriction, including without limitation the rights
-//  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-//  copies of the Software, and to permit persons to whom the Software is
-//  furnished to do so, subject to the following conditions:
-//
-//  The above copyright notice and this permission notice shall be included in
-//  all copies or substantial portions of the Software.
-//
-//  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-//  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-//  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-//  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-//  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-//  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-//  THE SOFTWARE.
-//
 
-#ifdef TOGLES
-#include "togles/rendermechanism.h"
+#pragma once
+
+#if defined( DXVK )
+
+#include "../dxvk-native-1.9.2b/include/native/directx/d3d9.h"
+#include "togl/dxabstract.h"
+#include "togl/dxabstract_types.h"
+
+typedef void* VD3DHWND;
+typedef void* VD3DHANDLE;
+
+inline void toglGetClientRect( void *hWnd, RECT *destRect )
+{
+	// the only useful answer this call can offer, is the size of the canvas.
+	// actually getting the window bounds is not useful.
+	// so, see if a D3D device is up and running, and if so,
+	// dig in and find out its backbuffer size and use that.
+
+	uint width, height;	
+#ifdef USE_SDL
+    SDL_GetWindowSize( hWnd, &width, &height );
 #else
+#error "Implete ME!"
+#endif
 
-#ifndef RENDERMECHANISM_H
-#define RENDERMECHANISM_H
+	Assert( width!=0 && height!=0 );
 
-#if defined(DX_TO_GL_ABSTRACTION)
-
-#undef PROTECTED_THINGS_ENABLE
-
-#include "SDL_opengl.h"
-#include "tier0/basetypes.h"
-#include "tier0/platform.h"
-
-#include "togl/linuxwin/glmdebug.h"
-#include "togl/linuxwin/glbase.h"
-#include "togl/linuxwin/glentrypoints.h"
-#include "togl/linuxwin/glmdisplay.h"
-#include "togl/linuxwin/glmdisplaydb.h"
-#include "togl/linuxwin/glmgrbasics.h"
-#include "togl/linuxwin/glmgrext.h"
-#include "togl/linuxwin/cglmbuffer.h"
-#include "togl/linuxwin/cglmtex.h"
-#include "togl/linuxwin/cglmfbo.h"
-#include "togl/linuxwin/cglmprogram.h"
-#include "togl/linuxwin/cglmquery.h"
-#include "togl/linuxwin/glmgr.h"
-#include "togl/linuxwin/dxabstract_types.h"
-#include "togl/linuxwin/dxabstract.h"
+	destRect->left = 0;
+	destRect->top = 0;
+	destRect->right = width;
+	destRect->bottom = height;		
+}
 
 #else
 	//USE_ACTUAL_DX
@@ -65,14 +43,12 @@
 			#include "../../dx9sdk/include/d3d9.h"
 			#include "../../dx9sdk/include/d3dx9.h"
 		#endif
-		typedef HWND VD3DHWND;
 	#endif
 
-	#define	GLMPRINTF(args)	
-	#define	GLMPRINTSTR(args)
-	#define	GLMPRINTTEXT(args)
-#endif // defined(DX_TO_GL_ABSTRACTION)
+typedef HWND VD3DHWND;
 
-#endif // RENDERMECHANISM_H
+#endif // DXVK
 
-#endif
+#define	GLMPRINTF(args)	
+#define	GLMPRINTSTR(args)
+#define	GLMPRINTTEXT(args)

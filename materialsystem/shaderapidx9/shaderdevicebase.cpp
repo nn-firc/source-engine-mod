@@ -1237,10 +1237,10 @@ void CShaderDeviceBase::GetWindowSize( int& nWidth, int& nHeight ) const
 	{
 		// NOTE: Use the 'current view' (which may be the same as the main window) 
 		RECT rect;
-#ifdef _WIN32
-		GetClientRect( ( HWND )m_ViewHWnd, &rect );
-#else
+#ifdef DXVK
 		toglGetClientRect( (VD3DHWND)m_ViewHWnd, &rect );
+#else
+		GetClientRect( ( HWND )m_ViewHWnd, &rect );
 #endif
 		nWidth = rect.right - rect.left;
 		nHeight = rect.bottom - rect.top;

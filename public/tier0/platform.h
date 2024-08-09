@@ -820,8 +820,12 @@ typedef void * HINSTANCE;
 #define _wtoi(arg) wcstol(arg, NULL, 10)
 #define _wtoi64(arg) wcstoll(arg, NULL, 10)
 
+#ifdef DXVK
+#include "../dxvk-native-1.9.2b/include/native/windows/windows.h"
+#else
 typedef uintp HMODULE;
 typedef void *HANDLE;
+#endif
 #endif
 
 //-----------------------------------------------------------------------------
